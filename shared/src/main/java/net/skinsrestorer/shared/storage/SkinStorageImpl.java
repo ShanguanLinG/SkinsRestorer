@@ -114,7 +114,15 @@ public class SkinStorageImpl implements SkinStorage {
                 }
             }
 
-            Optional<SkinProperty> skinProperty = profileGetter.getProfile(uuid);
+            Optional<SkinProperty> skinProperty;
+            try {
+                skinProperty = profileGetter.getProfile(uuid);
+            } catch (DataRequestException e) {
+                if (currentSkin.isPresent()) {
+                    return currentSkin;
+                }
+                throw e;
+            }
             if (skinProperty.isEmpty()) {
                 return currentSkin;
             }
@@ -165,7 +173,9 @@ public class SkinStorageImpl implements SkinStorage {
             Optional<MojangSkinDataResult> optional = mojangAPI.getSkin(nameOrUniqueId);
 
             // Only cache name -> UUID if this is a name and not a UUID
-            if (uuidParseResult.isEmpty()) {
+            if (uuidParseResult.isEmpty() && optional.isPresent()
+                    && !cacheStorage.getCachedData(nameOrUniqueId, true).flatMap(MojangCacheData::getUniqueId)
+                    .equals(optional.map(MojangSkinDataResult::getUniqueId))) {
                 adapterReference.get().setCachedUUID(nameOrUniqueId,
                         MojangCacheData.of(optional.map(MojangSkinDataResult::getUniqueId).orElse(null),
                                 SRHelpers.getEpochSecond()));

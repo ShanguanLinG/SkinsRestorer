@@ -23,6 +23,8 @@ import net.skinsrestorer.api.property.SkinProperty;
 import net.skinsrestorer.shared.config.APIConfig;
 import net.skinsrestorer.shared.plugin.SRPlatformAdapter;
 import net.skinsrestorer.shared.connections.MojangAPIImpl;
+import net.skinsrestorer.shared.connections.PlayerSkinService;
+import net.skinsrestorer.shared.storage.adapter.AdapterReference;
 import net.skinsrestorer.shared.connections.http.HttpClient;
 import net.skinsrestorer.shared.connections.http.HttpResponse;
 import net.skinsrestorer.shared.log.SRLogger;
@@ -44,28 +46,33 @@ class MojangAPIImplTest {
     private final HttpClient httpClient = mock(HttpClient.class);
     private final SettingsManager settings = mock(SettingsManager.class);
     private final MojangAPIImpl api = new MojangAPIImpl(mock(MetricsCounter.class), mock(SRLogger.class),
-            mock(SRPlugin.class), httpClient, settings);
+            mock(SRPlugin.class), httpClient, settings, new PlayerSkinService(httpClient, mock(SRPlugin.class), new AdapterReference()));
 
     @ParameterizedTest
     @ValueSource(ints = {204, 404})
-    void missingProfilesDoNotFallBack(int status) throws Exception {
+    void missingProfilesFallBack(int status) throws Exception {
         when(settings.getProperty(APIConfig.ELYBY_ENABLED)).thenReturn(false);
         respond(new HttpResponse(status, "", Map.of()));
 
         assertTrue(api.getProfile(UUID.randomUUID()).isEmpty());
-        verify(httpClient, times(1)).execute(any(), any(), any(), any(), any(), any(), anyInt());
+        verify(httpClient, times(2)).execute(any(), any(), any(), any(), any(), any(), anyInt());
     }
 
     @ParameterizedTest
     @ValueSource(ints = {201, 301, 304, 400, 403, 429, 500, 503})
     void unexpectedStatusesTriggerFallback(int status) throws Exception {
         when(settings.getProperty(APIConfig.ELYBY_ENABLED)).thenReturn(false);
+
+        UUID uuid = UUID.randomUUID();
+        String value = java.util.Base64.getEncoder().encodeToString(("{\"profileId\":\"" + uuid
+                + "\",\"profileName\":\"Notch\",\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/test\"}}}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         respond(new HttpResponse(status, "{}", Map.of()), new HttpResponse(200,
-                "{\"skinProperty\":{\"value\":\"texture\",\"signature\":\"signature\"}}", Map.of()));
+                "{\"raw\":{\"id\":\"" + uuid + "\",\"properties\":[{\"name\":\"textures\",\"value\":\"" + value
+                        + "\",\"signature\":\"signature\"}]}}", Map.of()));
+        Optional<SkinProperty> result = api.getProfile(uuid);
 
-        Optional<SkinProperty> result = api.getProfile(UUID.randomUUID());
-
-        assertEquals(Optional.of(SkinProperty.of("texture", "signature")), result);
+        assertEquals(Optional.of(SkinProperty.of(value, "signature")), result);
         verify(httpClient, times(2)).execute(any(), any(), any(), any(), any(), any(), anyInt());
     }
 
@@ -98,7 +105,7 @@ class MojangAPIImplTest {
             return null;
         }).when(adapter).runAsyncDelayed(any(Runnable.class), anyLong(), any(TimeUnit.class));
         MojangAPIImpl batchApi = new MojangAPIImpl(mock(MetricsCounter.class), mock(SRLogger.class),
-                plugin, httpClient, settings);
+                plugin, httpClient, settings, new PlayerSkinService(httpClient, mock(SRPlugin.class), new AdapterReference()));
         respond(new HttpResponse(status, "{}", Map.of()));
 
         assertThrows(DataRequestException.class, () -> batchApi.getUUIDMojang("Notch"));

@@ -4,6 +4,8 @@ plugins {
     eclipse
 }
 
+idea.module.name = name
+
 tasks.named<UpdateDaemonJvm>("updateDaemonJvm") {
     languageVersion = JavaLanguageVersion.of(25)
 }

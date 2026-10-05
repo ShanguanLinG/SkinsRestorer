@@ -61,17 +61,19 @@ public class MojangAPIImpl implements MojangAPI {
     private final SRPlugin plugin;
     private final HttpClient httpClient;
     private final SettingsManager settings;
+    private final PlayerSkinService skinService;
 
     private final MojangBatchAPI newBatchAPI;
     private final MojangBatchAPI legacyBatchAPI;
 
     @Inject
-    public MojangAPIImpl(MetricsCounter metricsCounter, SRLogger logger, SRPlugin plugin, HttpClient httpClient, SettingsManager settings) {
+    public MojangAPIImpl(MetricsCounter metricsCounter, SRLogger logger, SRPlugin plugin, HttpClient httpClient, SettingsManager settings, PlayerSkinService skinService) {
         this.metricsCounter = metricsCounter;
         this.logger = logger;
         this.plugin = plugin;
         this.httpClient = httpClient;
         this.settings = settings;
+        this.skinService = skinService;
 
         RateLimitBackoff rateLimitBackoff = new RateLimitBackoff();
 
@@ -107,6 +109,10 @@ public class MojangAPIImpl implements MojangAPI {
             return Optional.empty();
         }
 
+        if (!settings.getProperty(APIConfig.ELYBY_ENABLED)) {
+            return skinService.getSkin(nameOrUniqueId);
+        }
+
         // If it is a valid UUID, we can just use it directly, otherwise we need to get the UUID from the name
         Optional<UUID> uuidResult = uuidParseResult.isEmpty() ? getUUID(nameOrUniqueId) : uuidParseResult;
         if (uuidResult.isEmpty()) {
@@ -129,7 +135,6 @@ public class MojangAPIImpl implements MojangAPI {
             return Optional.empty();
         }
 
-        List<Throwable> suppressedExceptions = new ArrayList<>();
         if (settings.getProperty(APIConfig.ELYBY_ENABLED)) {
             try {
                 Optional<UUID> uuid = getUUIDElyBy(playerName);
@@ -138,39 +143,10 @@ public class MojangAPIImpl implements MojangAPI {
                 }
             } catch (DataRequestException e) {
                 logger.debug(e);
-                suppressedExceptions.add(e);
             }
         }
 
-        try {
-            return getUUIDMojang(playerName, newBatchAPI);
-        } catch (DataRequestException e) {
-            logger.debug(e);
-            suppressedExceptions.add(e);
-        }
-
-        // Fallback to Mojang old API
-        try {
-            return getUUIDMojang(playerName, legacyBatchAPI);
-        } catch (DataRequestException e) {
-            logger.debug(e);
-            suppressedExceptions.add(e);
-        }
-
-        // Fall back to Eclipse API
-        try {
-            return getUUIDEclipse(playerName);
-        } catch (DataRequestException e) {
-            logger.debug(e);
-            suppressedExceptions.add(e);
-        }
-
-        DataRequestExceptionShared error = new DataRequestExceptionShared("Failed to get UUID for player: %s".formatted(playerName));
-        for (Throwable t : suppressedExceptions) {
-            error.addSuppressed(t);
-        }
-
-        throw error;
+        return skinService.getUUID(playerName);
     }
 
     public Optional<UUID> getUUIDMojang(String playerName) throws DataRequestException {
@@ -224,20 +200,7 @@ public class MojangAPIImpl implements MojangAPI {
             }
         }
 
-        try {
-            return getProfileMojang(uuid);
-        } catch (DataRequestException e) {
-            logger.debug(e);
-        }
-
-        // Fall back to Eclipse API
-        try {
-            return getProfileEclipse(uuid);
-        } catch (DataRequestException e) {
-            logger.debug(e);
-        }
-
-        throw new DataRequestExceptionShared("Failed to get profile for player: %s".formatted(uuid));
+        return skinService.getProfile(uuid, false);
     }
 
     /**
@@ -253,7 +216,7 @@ public class MojangAPIImpl implements MojangAPI {
             }
         }
 
-        return getProfileMojang(uuid);
+        return skinService.getProfile(uuid, true);
     }
 
     public Optional<SkinProperty> getProfileMojang(UUID uuid) throws DataRequestException {

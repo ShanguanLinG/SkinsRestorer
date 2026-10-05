@@ -67,12 +67,22 @@ public class CacheStorageImpl implements CacheStorage {
             try {
                 Optional<UUID> uuid = mojangAPI.getUUID(playerName);
 
-                adapterReference.get().setCachedUUID(playerName,
-                        MojangCacheData.of(uuid.orElse(null), SRHelpers.getEpochSecond()));
+                Optional<UUID> previous = getCachedData(playerName, true).flatMap(MojangCacheData::getUniqueId);
+                if (uuid.isEmpty()) {
+                    return previous;
+                }
+                if (!previous.equals(uuid)) {
+                    adapterReference.get().setCachedUUID(playerName,
+                            MojangCacheData.of(uuid.get(), SRHelpers.getEpochSecond()));
+                }
 
                 return uuid;
             } catch (DataRequestException e) {
                 logger.debug("Failed to get UUID from Mojang for %s".formatted(playerName), e);
+                Optional<UUID> previous = getCachedData(playerName, true).flatMap(MojangCacheData::getUniqueId);
+                if (previous.isPresent()) {
+                    return previous;
+                }
                 throw new DataRequestExceptionShared(e);
             }
         } catch (StorageAdapter.StorageException e) {
